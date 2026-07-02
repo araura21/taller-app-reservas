@@ -1,16 +1,15 @@
 name: Telegram Notify
 
-# Respaldo manual — la notificación principal se envía desde sonarqube.yml
+# Entregable del taller: notificación vía Telegram en cada push.
+# En CI la notificación principal la envía sonarqube.yml con métricas SAST.
+# Este workflow sirve como respaldo en push y para pruebas manuales.
+
 on:
   workflow_dispatch:
 
-permissions:
-  actions: read
-  contents: read
-
 jobs:
   notify:
-    name: Notificar manualmente en Telegram
+    name: Notificar commit en Telegram
     runs-on: ubuntu-latest
 
     steps:
@@ -36,9 +35,10 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_SERVER_URL: ${{ github.server_url }}
           GITHUB_SHA: ${{ github.sha }}
-          COMMIT_MESSAGE: "Notificacion manual"
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message || 'Prueba manual' }}
           CHANGED_FILES: ${{ steps.files.outputs.changed_files }}
-          STATUS_TXT: "MANUAL"
+          ACTIONS_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          STATUS_TXT: "PRUEBA MANUAL"
         run: |
           chmod +x tools/telegram-notify.sh
           ./tools/telegram-notify.sh

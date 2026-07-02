@@ -1,32 +1,40 @@
-# Evidencias del taller — Quality Gates + Telegram
+# Evidencias — Presentación del taller
 
-Instrucciones para capturar las evidencias que pide `Tarea.md`.
+Guía para capturar las **2 evidencias** que pide `Tarea.md`.
 
 ---
 
-## Evidencia 1 — Quality Gate fallido en SonarQube
+## Antes de presentar — checklist
 
-### Pasos
+- [ ] Secrets en GitHub: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
+- [ ] Bot invitado al grupo de Telegram
+- [ ] Push a `main` ejecutó `SonarQube SAST Analysis` sin error de Telegram
+- [ ] Carpeta `orders-service/src/` presente (errores intencionales)
 
-1. Levantar SonarQube local:
+---
+
+## Evidencia 1 — Quality Gate FALLIDO en SonarQube
+
+### Opción A: Captura desde CI (recomendada para demo en vivo)
+
+1. Hacer push a `main`
+2. Abrir GitHub Actions → run de **SonarQube SAST Analysis**
+3. En el paso **Reporte en GitHub** ver métricas y estado **FALLADO**
+4. Para captura en SonarQube UI local (opcional):
    ```bash
    docker compose -f docker-compose.sonar.yml up -d
-   ```
-2. Importar el gate e ejecutar análisis:
-   ```bash
-   export SONAR_HOST_URL=http://localhost:9000
-   export SONAR_TOKEN=<tu-token>
+   export SONAR_TOKEN=<token>
    ./tools/import-quality-gate.sh
    ./tools/run-sonar-analysis.sh
    ```
-3. Abrir http://localhost:9000/dashboard?id=taller-app-reservas
-4. Confirmar que el gate **StrictGate** está en rojo (**Failed**)
-5. Capturar pantalla mostrando:
-   - Nombre del proyecto
-   - Estado del Quality Gate
-   - Métricas incumplidas (duplicación, complejidad, security hotspots, etc.)
+5. Abrir http://localhost:9000/dashboard?id=taller-app-reservas
+6. Capturar pantalla con **StrictGate en rojo** y métricas incumplidas
 
-> El fallo del gate puede deberse a la deuda técnica, duplicación o code smells del propio proyecto.
+### Qué debe verse
+
+- Proyecto: `taller-app-reservas`
+- Quality Gate: **Failed**
+- Issues en `orders-service/` (duplicación, complejidad, security hotspots)
 
 ### Captura
 
@@ -34,19 +42,22 @@ Instrucciones para capturar las evidencias que pide `Tarea.md`.
 
 ---
 
-## Evidencia 2 — Notificación en Telegram
+## Evidencia 2 — Notificación automática en Telegram
 
 ### Pasos
 
-1. Configurar secrets `TELEGRAM_BOT_TOKEN` y `TELEGRAM_CHAT_ID` en GitHub.
-2. Hacer push a `main` o `develop`.
-3. Esperar que terminen los workflows `SonarQube SAST Analysis` y `Telegram Notify`.
-4. Capturar pantalla del grupo mostrando:
-   - Autor del commit
-   - Rama
-   - Archivos modificados
-   - Enlace al commit
-   - Resultado del Quality Gate
+1. Hacer un commit y push a `main` o `develop`
+2. Esperar que termine **SonarQube SAST Analysis** (~5–10 min)
+3. Revisar el grupo de Telegram
+
+### Qué debe verse en el mensaje
+
+- **Analisis SAST - Taller App Reservas**
+- Estado del Quality Gate: **APROBADO** o **FALLADO**
+- Autor, rama, commit
+- Archivos modificados
+- Métricas (bugs, smells, duplicación, etc.)
+- Enlaces al commit y logs
 
 ### Captura
 
@@ -54,9 +65,34 @@ Instrucciones para capturar las evidencias que pide `Tarea.md`.
 
 ---
 
-## Checklist de entrega
+## Guion sugerido para la presentación (5 min)
 
-- [ ] Repositorio con `sonarqube.yml`, `telegram-notify.yml`, `qualitygate.json`
-- [ ] Captura SonarQube con gate **Failed**
-- [ ] Captura Telegram con notificación automática
-- [ ] Ningún token expuesto en el código
+1. **Contexto** — Por qué Quality Gates + Telegram en un equipo de desarrollo
+2. **StrictGate** — Mostrar `qualitygate.json` y tabla de umbrales en README
+3. **Demo CI** — Push → Actions falla (gate) → Telegram llega con métricas
+4. **Evidencia SonarQube** — Gate fallido por `orders-service` (errores intencionales)
+5. **Roles** — Líder calidad, DevOps, desarrolladores
+
+---
+
+## Entregables en el repositorio
+
+```text
+.github/workflows/sonarqube.yml      ← CI SonarQube
+.github/workflows/telegram-notify.yml ← Entregable Telegram
+qualitygate.json                      ← StrictGate
+tools/telegram-notify.sh              ← Script de notificación
+orders-service/                       ← Demo gate fallido
+README.md                             ← Documentación completa
+```
+
+---
+
+## Problemas frecuentes
+
+| Problema | Solución |
+|----------|----------|
+| Métricas en 0 | Verificar paso "Listar archivos indexados" en Actions |
+| Telegram no llega | Revisar secrets y que el bot esté en el grupo |
+| Gate pasa cuando debería fallar | Confirmar que `orders-service/src/` está en el repo |
+| Workflow muy lento | Normal (~5–10 min); SonarQube arranca contenedor en CI |

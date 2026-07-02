@@ -1,79 +1,61 @@
-# 📆 ReservasEC — Taller Quality Gates
+# 📆 ReservasEC — Taller Quality Gates + Telegram
 
-**ReservasEC** es una plataforma fullstack de gestión de reservas con arquitectura de microservicios. Este repositorio incluye la integración de **SonarQube**, **Quality Gates** y **notificaciones Telegram** requerida por el taller.
-
-## 🚀 Tecnologías principales
-
-- **Frontend:** Next.js + Tailwind CSS
-- **Backend:** Auth, Booking, User, Notification (Node.js + Express)
-- **Demo taller:** `orders-service` (errores intencionales para Quality Gate)
-- **Calidad:** SonarQube + GitHub Actions + Telegram
-- **Contenedores:** Docker + Docker Compose
+Plataforma de reservas con microservicios, integrada con **SonarQube StrictGate** y **notificaciones Telegram** según `Tarea.md`.
 
 ---
 
-## 📁 Estructura del proyecto
+## 📦 Entregables del taller
+
+| Entregable | Ubicación | Estado |
+|------------|-----------|--------|
+| Workflow SonarQube | `.github/workflows/sonarqube.yml` | ✅ |
+| Workflow Telegram | `.github/workflows/telegram-notify.yml` | ✅ |
+| Quality Gate JSON | `qualitygate.json` | ✅ |
+| Scripts del equipo | `tools/` | ✅ |
+| Demo gate fallido | `orders-service/` | ✅ |
+| Documentación | Este README | ✅ |
+
+---
+
+## 🏗️ Estructura del proyecto
 
 ```plaintext
 taller-app-reservas/
 ├── .github/workflows/
-│   ├── sonarqube.yml          # Análisis SAST + Quality Gate
-│   └── telegram-notify.yml    # Notificaciones al grupo
-├── tools/                     # Scripts reutilizables del equipo
-├── orders-service/            # Demo con errores intencionales
-├── qualitygate.json           # Definición StrictGate
-├── docker-compose.yml         # App de reservas
-└── docker-compose.sonar.yml   # SonarQube local
+│   ├── sonarqube.yml           # CI: análisis + Quality Gate + Telegram
+│   └── telegram-notify.yml     # Entregable (prueba manual)
+├── tools/
+│   ├── import-quality-gate.sh  # Importa qualitygate.json
+│   ├── run-sonar-analysis.sh   # Análisis local
+│   └── telegram-notify.sh      # Envío a Telegram (API directa)
+├── orders-service/             # Demo con errores intencionales (taller)
+├── qualitygate.json            # Definición StrictGate
+├── docker-compose.yml          # App de reservas
+└── docker-compose.sonar.yml    # SonarQube local
 ```
 
 ---
 
-## ⚙️ Configuración de la aplicación
+## 🔍 SonarQube local
 
-### Clonar e instalar
-
-```bash
-git clone https://github.com/araura21/taller-app-reservas.git
-cd taller-app-reservas
-docker-compose build && docker-compose up
-```
-
-App disponible en http://localhost:3000
-
-### Variables de entorno
-
-Cada microservicio tiene su `.env`. Ejemplo `auth-service`:
-
-```bash
-PORT=4000
-MONGO_URI=mongodb://mongo:27017/auth-db
-JWT_SECRET=supersecretkey
-```
-
----
-
-## 🔍 SonarQube — Análisis local
-
-### 1. Levantar SonarQube
+### Levantar SonarQube
 
 ```bash
 docker compose -f docker-compose.sonar.yml up -d
 ```
 
-Abrir http://localhost:9000 — usuario inicial `admin` / `admin` (cambiar contraseña en el primer login).
+Abrir http://localhost:9000 — login inicial `admin` / `admin`.
 
-### 2. Generar token
-
-**My Account → Security → Generate Token** → guardar el token (no subirlo al repo).
-
-### 3. Importar Quality Gate `StrictGate`
+### Importar Quality Gate `StrictGate`
 
 ```bash
 export SONAR_HOST_URL=http://localhost:9000
-export SONAR_TOKEN=<tu-token>
+export SONAR_TOKEN=<token-desde-sonarqube>
 chmod +x tools/import-quality-gate.sh
 ./tools/import-quality-gate.sh
 ```
+
+### Quality Gate — umbrales (`qualitygate.json`)
 
 | Métrica | Condición | Umbral |
 |---------|-----------|--------|
@@ -87,40 +69,46 @@ chmod +x tools/import-quality-gate.sh
 | Cyclomatic Complexity (total) | > | 50 |
 | Cognitive Complexity (total) | > | 30 |
 
-Los umbrales se editan en `qualitygate.json` y se reimportan con el script.
-
-### 4. Ejecutar análisis manual
+### Análisis manual
 
 ```bash
-export SONAR_TOKEN=<tu-token>
-chmod +x tools/run-sonar-analysis.sh
+export SONAR_TOKEN=<token>
 ./tools/run-sonar-analysis.sh
 ```
 
-> El análisis escanea **todo el repositorio** con `projectKey=taller-app-reservas`, igual que en CI. No se usa `sonar-project.properties` para no limitar qué archivos analiza SonarQube.
+Dashboard: http://localhost:9000/dashboard?id=taller-app-reservas
 
-Resultado: http://localhost:9000/dashboard?id=taller-app-reservas
+> El scanner analiza **todo el repositorio** (igual que CI), incluyendo `orders-service/`.
 
 ---
 
 ## 🤖 Bot de Telegram
 
-### Configuración (una sola vez)
+### Configuración (una vez)
 
-1. Crear bot con **@BotFather** (`/newbot`) y guardar el token.
-2. Crear grupo de Telegram, invitar al bot.
-3. Obtener **Chat ID** con:
+1. Crear bot con **@BotFather** → `/newbot` → guardar token.
+2. Crear grupo, invitar al bot.
+3. Obtener Chat ID:
    ```text
    https://api.telegram.org/bot<TOKEN>/getUpdates
    ```
-4. Configurar secrets en GitHub (**Settings → Secrets → Actions**):
+4. En GitHub → **Settings → Secrets → Actions**:
 
 | Secret | Descripción |
 |--------|-------------|
 | `TELEGRAM_BOT_TOKEN` | Token de BotFather |
-| `TELEGRAM_CHAT_ID` | ID del grupo (incluye el `-`) |
+| `TELEGRAM_CHAT_ID` | ID del grupo (con `-`) |
 
-> Nunca commitear tokens. Solo usar GitHub Secrets.
+> **Nunca** subir tokens al repositorio.
+
+### Qué incluye cada notificación (automática en cada push)
+
+- Autor del commit
+- Rama afectada
+- Archivos modificados
+- Enlace al commit y a los logs de CI
+- Resultado del Quality Gate (APROBADO / FALLADO)
+- Métricas: bugs, vulnerabilidades, code smells, líneas, duplicación, ratings
 
 ### Probar localmente
 
@@ -134,24 +122,21 @@ export GITHUB_SHA="$(git rev-parse HEAD)"
 ./tools/telegram-notify.sh
 ```
 
-### Contenido de cada notificación
-
-- Autor del commit
-- Rama afectada
-- Lista de archivos modificados
-- Enlace al commit en GitHub
-- Resultado del Quality Gate de SonarQube
-
 ---
 
-## ⚡ Pipelines CI/CD
+## ⚡ Pipeline CI/CD
 
-| Workflow | Trigger | Función |
-|----------|---------|---------|
-| `sonarqube.yml` | push/PR a `main` y `develop` | Tests, cobertura, análisis SAST, falla si el gate no pasa |
-| `telegram-notify.yml` | Al terminar el workflow de SonarQube | Envía notificación al grupo de Telegram |
+| Evento | Workflow | Qué hace |
+|--------|----------|----------|
+| Push/PR a `main` o `develop` | `sonarqube.yml` | Instala deps → StrictGate → escaneo → **falla si gate no pasa** → Telegram |
+| Manual | `telegram-notify.yml` | Prueba de notificación sin análisis |
 
-El análisis en CI levanta SonarQube como service container — no requiere ngrok ni servidor externo.
+SonarQube corre como **service container** en GitHub Actions — no requiere servidor externo ni ngrok.
+
+Variables del taller en CI:
+- `SONAR_TOKEN` — generado automáticamente en cada run
+- `SONAR_HOST_URL` — `http://sonarqube:9000` (contenedor interno)
+- `sonar.qualitygate.wait=true` — el pipeline falla si el gate no se cumple
 
 ---
 
@@ -159,28 +144,38 @@ El análisis en CI levanta SonarQube como service container — no requiere ngro
 
 | Rol | Responsabilidad |
 |-----|-----------------|
-| **Líder de calidad** | SonarQube local, importar `StrictGate`, evidencias |
-| **DevOps** | Secrets de GitHub, bot Telegram, workflows |
-| **Desarrolladores** | Corregir issues, ampliar tests y cobertura |
+| **Líder de calidad** | SonarQube local, `StrictGate`, captura de evidencias |
+| **DevOps** | Secrets GitHub, bot Telegram, workflows |
+| **Desarrolladores** | Corregir issues reportados por SonarQube |
 
 ---
 
-## 🛠️ Guía de modificación
+## 🎯 Evidencias para la presentación
+
+Ver **`evidencias_taller.md`** con instrucciones paso a paso.
+
+1. **SonarQube — gate fallido** por errores en `orders-service/`
+2. **Telegram — notificación automática** al hacer push
+
+---
+
+## ⚙️ App de reservas (sin cambios del taller)
+
+```bash
+docker-compose build && docker-compose up
+```
+
+App en http://localhost:3000
+
+Los microservicios (`auth`, `booking`, `user`, `notification`, `frontend`) **no se modifican** para el taller. Solo `orders-service/` contiene código demo con errores intencionales.
+
+---
+
+## 🛠️ Guía rápida de modificación
 
 | Cambiar… | Archivo |
 |----------|---------|
-| Umbrales del Quality Gate | `qualitygate.json` |
-| Servicios analizados | El scanner usa todo el repo (igual que CI) |
-| Servicios con tests en CI | `tools/run-tests-with-coverage.sh` |
+| Umbrales del gate | `qualitygate.json` → `./tools/import-quality-gate.sh` |
 | Mensaje Telegram | `tools/telegram-notify.sh` |
 | Triggers CI | `.github/workflows/*.yml` |
-
----
-
-## ✅ Funcionalidades de la app
-
-- Registro e inicio de sesión
-- Perfil editable
-- Creación y cancelación de reservas
-- Notificaciones por email
-- Quality Gates automatizados con notificación al equipo
+| Errores demo | `orders-service/src/` |
