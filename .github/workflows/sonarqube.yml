@@ -91,43 +91,22 @@ jobs:
             -Dsonar.qualitygate.wait=true
             -Dsonar.qualitygate.timeout=300
 
-      - name: Escanear dependencias con Trivy
-        if: always()
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: 'fs'
-          scan-ref: '.'
-          format: 'json'
-          output: 'trivy-report.json'
-          exit-code: '0'
-          severity: 'CRITICAL,HIGH,MEDIUM,LOW'
-
-      - name: Extraer resumen de Trivy
+      - name: Listar archivos indexados
         if: always()
         run: |
-          [ -f "trivy-report.json" ] || { echo "TRIVY_CRITICAL=0" >> $GITHUB_ENV; echo "TRIVY_HIGH=0" >> $GITHUB_ENV; echo "TRIVY_MEDIUM=0" >> $GITHUB_ENV; echo "TRIVY_LOW=0" >> $GITHUB_ENV; echo "TRIVY_TOTAL=0" >> $GITHUB_ENV; exit 0; }
-          CRITICAL=$(jq -r '.Results[]?.Vulnerabilities[]? | select(.Severity=="CRITICAL") | .VulnerabilityID' trivy-report.json | wc -l | tr -d ' ')
-          HIGH=$(jq -r '.Results[]?.Vulnerabilities[]? | select(.Severity=="HIGH") | .VulnerabilityID' trivy-report.json | wc -l | tr -d ' ')
-          MEDIUM=$(jq -r '.Results[]?.Vulnerabilities[]? | select(.Severity=="MEDIUM") | .VulnerabilityID' trivy-report.json | wc -l | tr -d ' ')
-          LOW=$(jq -r '.Results[]?.Vulnerabilities[]? | select(.Severity=="LOW") | .VulnerabilityID' trivy-report.json | wc -l | tr -d ' ')
-          TOTAL=$((CRITICAL + HIGH + MEDIUM + LOW))
-          echo "TRIVY_CRITICAL=$CRITICAL" >> $GITHUB_ENV
-          echo "TRIVY_HIGH=$HIGH" >> $GITHUB_ENV
-          echo "TRIVY_MEDIUM=$MEDIUM" >> $GITHUB_ENV
-          echo "TRIVY_LOW=$LOW" >> $GITHUB_ENV
-          echo "TRIVY_TOTAL=$TOTAL" >> $GITHUB_ENV
-
-      - name: Subir reporte de Trivy
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: trivy-report
-          path: trivy-report.json
-          retention-days: 7
+          echo "=== Archivos indexados por SonarQube ==="
+          curl -s "http://localhost:9000/api/components/tree?component=taller-app-reservas&qualifiers=FIL&ps=500" -u "admin:admin" | jq -r '.components[].path' | sort
+          echo ""
+          TOTAL=$(curl -s "http://localhost:9000/api/components/tree?component=taller-app-reservas&qualifiers=FIL&ps=500" -u "admin:admin" | jq '.components | length')
+          echo "Total de archivos indexados: $TOTAL"
+          echo ""
+          echo "=== Directorios analizados ==="
+          curl -s "http://localhost:9000/api/components/tree?component=taller-app-reservas&qualifiers=DIR" -u "admin:admin" | jq -r '.components[].path'
 
       - name: Obtener metricas de SonarQube
         if: always()
         run: |
+          echo "Esperando metricas de SonarQube..."
           wait_for_metrics() {
             for i in {1..30}; do
               METRICS_RAW=$(curl -s "http://localhost:9000/api/measures/component?component=taller-app-reservas&metricKeys=bugs,vulnerabilities,code_smells,duplicated_lines_density,ncloc,security_rating,reliability_rating,sqale_rating" -u "admin:admin")
@@ -138,6 +117,7 @@ jobs:
             return 1
           }
           if wait_for_metrics; then
+            echo "Metricas disponibles"
             METRICS_RAW=$(curl -s "http://localhost:9000/api/measures/component?component=taller-app-reservas&metricKeys=bugs,vulnerabilities,code_smells,duplicated_lines_density,ncloc,security_rating,reliability_rating,sqale_rating" -u "admin:admin")
             QG_RAW=$(curl -s "http://localhost:9000/api/qualitygates/project_status?projectKey=taller-app-reservas" -u "admin:admin")
             BUGS=$(echo "$METRICS_RAW" | jq -r '.component.measures[]? | select(.metric=="bugs") | .value // 0')
@@ -150,6 +130,7 @@ jobs:
             MAIN_R=$(echo "$METRICS_RAW" | jq -r '.component.measures[]? | select(.metric=="sqale_rating") | .value // null')
             QG_STATUS=$(echo "$QG_RAW" | jq -r '.projectStatus.status // "UNKNOWN"')
           else
+            echo "AVISO: No se obtuvieron metricas"
             BUGS=0; VULNS=0; SMELLS=0; DUPL=0.0; LINES=0; SEC_R=null; REL_R=null; MAIN_R=null; QG_STATUS="UNKNOWN"
           fi
           rating_to_letter() { case $1 in 1) echo "A";; 2) echo "B";; 3) echo "C";; 4) echo "D";; 5) echo "E";; *) echo "N/A";; esac }
@@ -188,14 +169,6 @@ jobs:
           | Seguridad | $(rating_text $METRICS_SEC) **${METRICS_SEC}** |
           | Fiabilidad | $(rating_text $METRICS_REL) **${METRICS_REL}** |
           | Mantenibilidad | $(rating_text $METRICS_MAIN) **${METRICS_MAIN}** |
-          ### Vulnerabilidades en dependencias (Trivy)
-          | Severidad | Cantidad |
-          |---|---|
-          | CRITICAL | **${TRIVY_CRITICAL}** |
-          | HIGH | **${TRIVY_HIGH}** |
-          | MEDIUM | **${TRIVY_MEDIUM}** |
-          | LOW | **${TRIVY_LOW}** |
-          | **TOTAL** | **${TRIVY_TOTAL}** |
           ---
           *Análisis ejecutado en rama \`${{ github.ref_name }}\`*
           EOF
@@ -219,12 +192,6 @@ jobs:
           Seguridad: ${METRICS_SEC}
           Fiabilidad: ${METRICS_REL}
           Mantenibilidad: ${METRICS_MAIN}
-          <b>Vulnerabilidades en dependencias:</b>
-          CRITICAL: ${TRIVY_CRITICAL}
-          HIGH: ${TRIVY_HIGH}
-          MEDIUM: ${TRIVY_MEDIUM}
-          LOW: ${TRIVY_LOW}
-          <b>TOTAL: ${TRIVY_TOTAL}</b>
           <a href="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}">Ver logs completos</a>
           EOF
           )
