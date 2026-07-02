@@ -90,6 +90,7 @@ jobs:
           SONAR_SCANNER_OPTS: >
             -Dsonar.qualitygate.wait=true
             -Dsonar.qualitygate.timeout=300
+            -Dsonar.projectKey=taller-app-reservas
 
       - name: Listar archivos indexados
         if: always()
