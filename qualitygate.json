@@ -1,0 +1,60 @@
+{
+  "name": "StrictGate",
+  "description": "Quality Gate restrictivo para ReservasEC. Importar con: ./tools/import-quality-gate.sh",
+  "conditions": [
+    {
+      "metric": "blocker_violations",
+      "op": "GT",
+      "error": "0",
+      "label": "Blocker Issues"
+    },
+    {
+      "metric": "critical_violations",
+      "op": "GT",
+      "error": "0",
+      "label": "Critical Issues"
+    },
+    {
+      "metric": "major_violations",
+      "op": "GT",
+      "error": "5",
+      "label": "Major Issues"
+    },
+    {
+      "metric": "security_hotspots_reviewed",
+      "op": "LT",
+      "error": "100",
+      "label": "Security Hotspots Reviewed (%)"
+    },
+    {
+      "metric": "coverage",
+      "op": "LT",
+      "error": "80",
+      "label": "Coverage (%)"
+    },
+    {
+      "metric": "duplicated_lines_density",
+      "op": "GT",
+      "error": "3",
+      "label": "Duplicated Lines (%)"
+    },
+    {
+      "metric": "sqale_debt_ratio",
+      "op": "GT",
+      "error": "2.5",
+      "label": "Technical Debt Ratio (%)"
+    },
+    {
+      "metric": "complexity",
+      "op": "GT",
+      "error": "50",
+      "label": "Cyclomatic Complexity (total)"
+    },
+    {
+      "metric": "cognitive_complexity",
+      "op": "GT",
+      "error": "30",
+      "label": "Cognitive Complexity (total)"
+    }
+  ]
+}

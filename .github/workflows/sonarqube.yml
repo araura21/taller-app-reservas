@@ -1,0 +1,65 @@
+name: SonarQube Analysis
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+      - develop
+
+concurrency:
+  group: sonarqube-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sonarqube:
+    name: Análisis de calidad
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: |
+            auth-service/package-lock.json
+            booking-service/package-lock.json
+            orders-service/package-lock.json
+
+      - name: Ejecutar tests con cobertura
+        run: chmod +x tools/run-tests-with-coverage.sh && ./tools/run-tests-with-coverage.sh
+
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v4
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        with:
+          args: >
+            -Dsonar.qualitygate.wait=true
+            -Dsonar.projectKey=reservas-ec
+
+      - name: Guardar resultado del Quality Gate
+        if: always()
+        run: |
+          echo "SONAR_QUALITY_GATE_STATUS=${{ job.status == 'success' && 'OK' || 'FAILED' }}" >> "$GITHUB_ENV"
+
+      - name: Publicar artefacto de cobertura
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports
+          path: |
+            auth-service/coverage/
+            booking-service/coverage/
+            orders-service/coverage/
+          retention-days: 7
