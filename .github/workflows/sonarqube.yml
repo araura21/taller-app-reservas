@@ -1,0 +1,240 @@
+name: SonarQube SAST Analysis
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+jobs:
+  sonarqube:
+    name: Analisis SAST
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    services:
+      sonarqube:
+        image: sonarqube:10-community
+        ports:
+          - 9000:9000
+        env:
+          SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"
+          SONAR_SEARCH_JAVAADDITIONALOPTS: "-Xms512m -Xmx512m"
+        options: >-
+          --health-cmd "curl -sf http://localhost:9000/api/system/status || exit 1"
+          --health-interval 15s
+          --health-timeout 10s
+          --health-retries 20
+
+    steps:
+      - name: Checkout codigo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Instalar dependencias
+        run: |
+          npm install --ignore-scripts
+          cd auth-service && npm install --ignore-scripts
+          cd ../booking-service && npm install --ignore-scripts
+          cd ../user-service && npm install --ignore-scripts
+          cd ../notification-service && npm install --ignore-scripts
+          cd ../frontend && npm install --ignore-scripts
+
+      - name: Esperar SonarQube
+        run: |
+          for i in {1..60}; do
+            STATUS=$(curl -sf http://localhost:9000/api/system/status 2>/dev/null | jq -r '.status' 2>/dev/null || echo "waiting")
+            [ "$STATUS" = "UP" ] && break
+            sleep 5
+          done
+          curl -sf http://localhost:9000/api/system/status | grep -q "UP" || exit 1
+
+      - name: Configurar Quality Gate
+        run: |
+          TOKEN_RESPONSE=$(curl -s -X POST "http://localhost:9000/api/user_tokens/generate" -u "admin:admin" -d "name=ci-token&type=GLOBAL_ANALYSIS_TOKEN")
+          TOKEN=$(echo "$TOKEN_RESPONSE" | jq -r '.token')
+          [ "$TOKEN" = "null" ] || [ -z "$TOKEN" ] && sleep 10 && TOKEN_RESPONSE=$(curl -s -X POST "http://localhost:9000/api/user_tokens/generate" -u "admin:admin" -d "name=ci-token&type=GLOBAL_ANALYSIS_TOKEN") && TOKEN=$(echo "$TOKEN_RESPONSE" | jq -r '.token')
+          [ "$TOKEN" = "null" ] || [ -z "$TOKEN" ] && exit 1
+          echo "SONAR_TOKEN=$TOKEN" >> $GITHUB_ENV
+
+          QG_ID=$(curl -s -X POST "http://localhost:9000/api/qualitygates/create" -u "admin:admin" -d "name=StrictGate" | jq -r '.id')
+          [ "$QG_ID" = "null" ] || [ -z "$QG_ID" ] && QG_ID=$(curl -s "http://localhost:9000/api/qualitygates/list" -u "admin:admin" | jq -r '.qualitygates[] | select(.name=="Sonar way") | .id')
+
+          if [ -n "$QG_ID" ] && [ "$QG_ID" != "null" ]; then
+            CONDITIONS=$(curl -s "http://localhost:9000/api/qualitygates/show?id=$QG_ID" -u "admin:admin" | jq -r '.conditions[]?.id')
+            for cond in $CONDITIONS; do curl -s -X POST "http://localhost:9000/api/qualitygates/delete_condition" -u "admin:admin" -d "id=$cond" > /dev/null; done
+            curl -s -X POST "http://localhost:9000/api/qualitygates/create_condition" -u "admin:admin" -d "gateId=$QG_ID&metric=blocker_violations&op=GT&error=0" || true
+            curl -s -X POST "http://localhost:9000/api/qualitygates/create_condition" -u "admin:admin" -d "gateId=$QG_ID&metric=critical_violations&op=GT&error=0" || true
+            curl -s -X POST "http://localhost:9000/api/qualitygates/create_condition" -u "admin:admin" -d "gateId=$QG_ID&metric=major_violations&op=GT&error=5" || true
+            curl -s -X POST "http://localhost:9000/api/qualitygates/create_condition" -u "admin:admin" -d "gateId=$QG_ID&metric=security_hotspots_reviewed&op=LT&error=100" || true
+            curl -s -X POST "http://localhost:9000/api/qualitygates/create_condition" -u "admin:admin" -d "gateId=$QG_ID&metric=coverage&op=LT&error=80" || true
+            curl -s -X POST "http://localhost:9000/api/qualitygates/create_condition" -u "admin:admin" -d "gateId=$QG_ID&metric=duplicated_lines_density&op=GT&error=3" || true
+            curl -s -X POST "http://localhost:9000/api/qualitygates/create_condition" -u "admin:admin" -d "gateId=$QG_ID&metric=sqale_debt_ratio&op=GT&error=2.5" || true
+            curl -s -X POST "http://localhost:9000/api/qualitygates/create_condition" -u "admin:admin" -d "gateId=$QG_ID&metric=cyclomatic_complexity&op=GT&error=50" || true
+            curl -s -X POST "http://localhost:9000/api/qualitygates/create_condition" -u "admin:admin" -d "gateId=$QG_ID&metric=cognitive_complexity&op=GT&error=30" || true
+            curl -s -X POST "http://localhost:9000/api/qualitygates/set_as_default" -u "admin:admin" -d "id=$QG_ID" || true
+          fi
+
+      - name: Ejecutar SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v2
+        env:
+          SONAR_TOKEN: ${{ env.SONAR_TOKEN }}
+          SONAR_HOST_URL: http://sonarqube:9000
+          SONAR_SCANNER_OPTS: >
+            -Dsonar.qualitygate.wait=true
+            -Dsonar.qualitygate.timeout=300
+
+      - name: Escanear dependencias con Trivy
+        if: always()
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'json'
+          output: 'trivy-report.json'
+          exit-code: '0'
+          severity: 'CRITICAL,HIGH,MEDIUM,LOW'
+
+      - name: Extraer resumen de Trivy
+        if: always()
+        run: |
+          [ -f "trivy-report.json" ] || { echo "TRIVY_CRITICAL=0" >> $GITHUB_ENV; echo "TRIVY_HIGH=0" >> $GITHUB_ENV; echo "TRIVY_MEDIUM=0" >> $GITHUB_ENV; echo "TRIVY_LOW=0" >> $GITHUB_ENV; echo "TRIVY_TOTAL=0" >> $GITHUB_ENV; exit 0; }
+          CRITICAL=$(jq -r '.Results[]?.Vulnerabilities[]? | select(.Severity=="CRITICAL") | .VulnerabilityID' trivy-report.json | wc -l | tr -d ' ')
+          HIGH=$(jq -r '.Results[]?.Vulnerabilities[]? | select(.Severity=="HIGH") | .VulnerabilityID' trivy-report.json | wc -l | tr -d ' ')
+          MEDIUM=$(jq -r '.Results[]?.Vulnerabilities[]? | select(.Severity=="MEDIUM") | .VulnerabilityID' trivy-report.json | wc -l | tr -d ' ')
+          LOW=$(jq -r '.Results[]?.Vulnerabilities[]? | select(.Severity=="LOW") | .VulnerabilityID' trivy-report.json | wc -l | tr -d ' ')
+          TOTAL=$((CRITICAL + HIGH + MEDIUM + LOW))
+          echo "TRIVY_CRITICAL=$CRITICAL" >> $GITHUB_ENV
+          echo "TRIVY_HIGH=$HIGH" >> $GITHUB_ENV
+          echo "TRIVY_MEDIUM=$MEDIUM" >> $GITHUB_ENV
+          echo "TRIVY_LOW=$LOW" >> $GITHUB_ENV
+          echo "TRIVY_TOTAL=$TOTAL" >> $GITHUB_ENV
+
+      - name: Subir reporte de Trivy
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-report
+          path: trivy-report.json
+          retention-days: 7
+
+      - name: Obtener metricas de SonarQube
+        if: always()
+        run: |
+          wait_for_metrics() {
+            for i in {1..30}; do
+              METRICS_RAW=$(curl -s "http://localhost:9000/api/measures/component?component=taller-app-reservas&metricKeys=bugs,vulnerabilities,code_smells,duplicated_lines_density,ncloc,security_rating,reliability_rating,sqale_rating" -u "admin:admin")
+              COMPONENT=$(echo "$METRICS_RAW" | jq -r '.component // null')
+              [ "$COMPONENT" != "null" ] && [ -n "$COMPONENT" ] && return 0
+              sleep 5
+            done
+            return 1
+          }
+          if wait_for_metrics; then
+            METRICS_RAW=$(curl -s "http://localhost:9000/api/measures/component?component=taller-app-reservas&metricKeys=bugs,vulnerabilities,code_smells,duplicated_lines_density,ncloc,security_rating,reliability_rating,sqale_rating" -u "admin:admin")
+            QG_RAW=$(curl -s "http://localhost:9000/api/qualitygates/project_status?projectKey=taller-app-reservas" -u "admin:admin")
+            BUGS=$(echo "$METRICS_RAW" | jq -r '.component.measures[]? | select(.metric=="bugs") | .value // 0')
+            VULNS=$(echo "$METRICS_RAW" | jq -r '.component.measures[]? | select(.metric=="vulnerabilities") | .value // 0')
+            SMELLS=$(echo "$METRICS_RAW" | jq -r '.component.measures[]? | select(.metric=="code_smells") | .value // 0')
+            DUPL=$(echo "$METRICS_RAW" | jq -r '.component.measures[]? | select(.metric=="duplicated_lines_density") | .value // 0.0')
+            LINES=$(echo "$METRICS_RAW" | jq -r '.component.measures[]? | select(.metric=="ncloc") | .value // 0')
+            SEC_R=$(echo "$METRICS_RAW" | jq -r '.component.measures[]? | select(.metric=="security_rating") | .value // null')
+            REL_R=$(echo "$METRICS_RAW" | jq -r '.component.measures[]? | select(.metric=="reliability_rating") | .value // null')
+            MAIN_R=$(echo "$METRICS_RAW" | jq -r '.component.measures[]? | select(.metric=="sqale_rating") | .value // null')
+            QG_STATUS=$(echo "$QG_RAW" | jq -r '.projectStatus.status // "UNKNOWN"')
+          else
+            BUGS=0; VULNS=0; SMELLS=0; DUPL=0.0; LINES=0; SEC_R=null; REL_R=null; MAIN_R=null; QG_STATUS="UNKNOWN"
+          fi
+          rating_to_letter() { case $1 in 1) echo "A";; 2) echo "B";; 3) echo "C";; 4) echo "D";; 5) echo "E";; *) echo "N/A";; esac }
+          SEC_LETTER=$(rating_to_letter $SEC_R)
+          REL_LETTER=$(rating_to_letter $REL_R)
+          MAIN_LETTER=$(rating_to_letter $MAIN_R)
+          STATUS_TXT=$([ "$QG_STATUS" = "OK" ] && echo "APROBADO" || echo "FALLADO")
+          echo "METRICS_BUGS=$BUGS" >> $GITHUB_ENV
+          echo "METRICS_VULNS=$VULNS" >> $GITHUB_ENV
+          echo "METRICS_SMELLS=$SMELLS" >> $GITHUB_ENV
+          echo "METRICS_DUPL=$DUPL" >> $GITHUB_ENV
+          echo "METRICS_LINES=$LINES" >> $GITHUB_ENV
+          echo "METRICS_SEC=$SEC_LETTER" >> $GITHUB_ENV
+          echo "METRICS_REL=$REL_LETTER" >> $GITHUB_ENV
+          echo "METRICS_MAIN=$MAIN_LETTER" >> $GITHUB_ENV
+          echo "STATUS_TXT=$STATUS_TXT" >> $GITHUB_ENV
+
+      - name: Reporte en GitHub
+        if: always()
+        run: |
+          rating_text() { case $1 in A) echo "BUENO";; B) echo "REGULAR";; *) echo "MALO";; esac }
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+          # Reporte SAST - Taller App Reservas
+          ## Estado del Quality Gate: **${STATUS_TXT}**
+          ### Métricas Generales
+          | Métrica | Valor |
+          |---|---|
+          | Bugs | **${METRICS_BUGS}** |
+          | Vulnerabilidades | **${METRICS_VULNS}** |
+          | Code Smells | **${METRICS_SMELLS}** |
+          | Lineas de codigo | **${METRICS_LINES}** |
+          | Duplicacion | **${METRICS_DUPL}%** |
+          ### Ratings de Calidad
+          | Categoría | Rating |
+          |---|---|
+          | Seguridad | $(rating_text $METRICS_SEC) **${METRICS_SEC}** |
+          | Fiabilidad | $(rating_text $METRICS_REL) **${METRICS_REL}** |
+          | Mantenibilidad | $(rating_text $METRICS_MAIN) **${METRICS_MAIN}** |
+          ### Vulnerabilidades en dependencias (Trivy)
+          | Severidad | Cantidad |
+          |---|---|
+          | CRITICAL | **${TRIVY_CRITICAL}** |
+          | HIGH | **${TRIVY_HIGH}** |
+          | MEDIUM | **${TRIVY_MEDIUM}** |
+          | LOW | **${TRIVY_LOW}** |
+          | **TOTAL** | **${TRIVY_TOTAL}** |
+          ---
+          *Análisis ejecutado en rama \`${{ github.ref_name }}\`*
+          EOF
+
+      - name: Construir mensaje para Telegram
+        if: always()
+        run: |
+          MESSAGE=$(cat <<EOF
+          <b>Analisis SAST - Taller App Reservas</b>
+          <b>Estado del Quality Gate:</b> ${STATUS_TXT}
+          <b>Rama:</b> <code>${{ github.ref_name }}</code>
+          <b>Autor:</b> ${{ github.actor }}
+          <b>Commit:</b> ${{ github.event.head_commit.message }}
+          <b>Metricas Generales:</b>
+          Bugs: ${METRICS_BUGS}
+          Vulnerabilidades: ${METRICS_VULNS}
+          Code Smells: ${METRICS_SMELLS}
+          Lineas de codigo: ${METRICS_LINES}
+          Duplicacion: ${METRICS_DUPL}%
+          <b>Ratings de Calidad:</b>
+          Seguridad: ${METRICS_SEC}
+          Fiabilidad: ${METRICS_REL}
+          Mantenibilidad: ${METRICS_MAIN}
+          <b>Vulnerabilidades en dependencias:</b>
+          CRITICAL: ${TRIVY_CRITICAL}
+          HIGH: ${TRIVY_HIGH}
+          MEDIUM: ${TRIVY_MEDIUM}
+          LOW: ${TRIVY_LOW}
+          <b>TOTAL: ${TRIVY_TOTAL}</b>
+          <a href="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}">Ver logs completos</a>
+          EOF
+          )
+          echo "$MESSAGE" > telegram_message.txt
+
+      - name: Enviar notificacion a Telegram
+        if: always()
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_TOKEN }}
+          format: html
+          message_file: telegram_message.txt
