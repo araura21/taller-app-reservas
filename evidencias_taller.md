@@ -26,7 +26,7 @@ Instrucciones para capturar las evidencias que pide `Tarea.md`.
    - Estado del Quality Gate
    - Métricas incumplidas (duplicación, complejidad, security hotspots, etc.)
 
-> El fallo es **esperado** por los errores intencionales en `orders-service/`.
+> El fallo del gate puede deberse a la deuda técnica, duplicación o code smells del propio proyecto.
 
 ### Captura
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Ejecuta tests con cobertura y lanza sonar-scanner localmente.
+# Ejecuta sonar-scanner localmente (sin modificar el código del proyecto).
 # Uso: export SONAR_HOST_URL=http://localhost:9000 SONAR_TOKEN=<token> && ./tools/run-sonar-analysis.sh
 
 set -euo pipefail
@@ -15,11 +15,13 @@ if [[ -z "$SONAR_TOKEN" ]]; then
   exit 1
 fi
 
-"$SCRIPT_DIR/run-tests-with-coverage.sh"
-
 cd "$ROOT_DIR"
 if command -v sonar-scanner &>/dev/null; then
-  sonar-scanner -Dsonar.host.url="$SONAR_HOST_URL" -Dsonar.token="$SONAR_TOKEN"
+  sonar-scanner \
+    -Dsonar.host.url="$SONAR_HOST_URL" \
+    -Dsonar.token="$SONAR_TOKEN" \
+    -Dsonar.projectKey=taller-app-reservas \
+    -Dsonar.qualitygate.wait=true
 else
   docker run --rm \
     -e SONAR_HOST_URL="$SONAR_HOST_URL" \
@@ -27,7 +29,9 @@ else
     -v "$ROOT_DIR:/usr/src" -w /usr/src \
     sonarsource/sonar-scanner-cli:latest \
     -Dsonar.host.url="$SONAR_HOST_URL" \
-    -Dsonar.token="$SONAR_TOKEN"
+    -Dsonar.token="$SONAR_TOKEN" \
+    -Dsonar.projectKey=taller-app-reservas \
+    -Dsonar.qualitygate.wait=true
 fi
 
 echo "✅ Análisis completado: ${SONAR_HOST_URL}/dashboard?id=taller-app-reservas"

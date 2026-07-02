@@ -22,7 +22,6 @@ taller-app-reservas/
 ├── tools/                     # Scripts reutilizables del equipo
 ├── orders-service/            # Demo con errores intencionales
 ├── qualitygate.json           # Definición StrictGate
-├── sonar-project.properties   # Configuración del análisis
 ├── docker-compose.yml         # App de reservas
 └── docker-compose.sonar.yml   # SonarQube local
 ```
@@ -98,11 +97,9 @@ chmod +x tools/run-sonar-analysis.sh
 ./tools/run-sonar-analysis.sh
 ```
 
+> El análisis escanea **todo el repositorio** con `projectKey=taller-app-reservas`, igual que en CI. No se usa `sonar-project.properties` para no limitar qué archivos analiza SonarQube.
+
 Resultado: http://localhost:9000/dashboard?id=taller-app-reservas
-
-### Servicio demo `orders-service`
-
-Contiene **errores intencionales** para demostrar un Quality Gate fallido. Ver `orders-service/README.md`.
 
 ---
 
@@ -173,7 +170,7 @@ El análisis en CI levanta SonarQube como service container — no requiere ngro
 | Cambiar… | Archivo |
 |----------|---------|
 | Umbrales del Quality Gate | `qualitygate.json` |
-| Servicios analizados | `sonar-project.properties` |
+| Servicios analizados | El scanner usa todo el repo (igual que CI) |
 | Servicios con tests en CI | `tools/run-tests-with-coverage.sh` |
 | Mensaje Telegram | `tools/telegram-notify.sh` |
 | Triggers CI | `.github/workflows/*.yml` |
