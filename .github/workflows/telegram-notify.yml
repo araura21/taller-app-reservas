@@ -1,55 +1,44 @@
 name: Telegram Notify
 
+# Respaldo manual — la notificación principal se envía desde sonarqube.yml
 on:
-  workflow_run:
-    workflows: ["SonarQube SAST Analysis"]
-    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
 
 jobs:
   notify:
-    name: Notificar commit en Telegram
+    name: Notificar manualmente en Telegram
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion != 'cancelled' }}
 
     steps:
-      - name: Checkout commit analizado
+      - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 2
 
       - name: Obtener archivos modificados
         id: files
         run: |
-          BEFORE="${{ github.event.workflow_run.head_sha }}~1"
-          FILES=$(git diff --name-only "$BEFORE" "${{ github.event.workflow_run.head_sha }}" 2>/dev/null | head -20 || git show --name-only --pretty=format: "${{ github.event.workflow_run.head_sha }}" | head -20)
+          FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null | head -15 || git show --name-only --pretty=format: HEAD | head -15)
           echo "changed_files<<EOF" >> "$GITHUB_OUTPUT"
           echo "$FILES" >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
-
-      - name: Descargar resultado de SonarQube
-        id: sonar
-        continue-on-error: true
-        uses: actions/download-artifact@v4
-        with:
-          name: sonar-quality-gate-status
-          run-id: ${{ github.event.workflow_run.id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Enviar notificacion a Telegram
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          GITHUB_ACTOR: ${{ github.event.workflow_run.actor.login }}
-          GITHUB_REF_NAME: ${{ github.event.workflow_run.head_branch }}
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_SERVER_URL: ${{ github.server_url }}
-          GITHUB_SHA: ${{ github.event.workflow_run.head_sha }}
-          COMMIT_MESSAGE: ${{ github.event.workflow_run.display_title }}
+          GITHUB_SHA: ${{ github.sha }}
+          COMMIT_MESSAGE: "Notificacion manual"
           CHANGED_FILES: ${{ steps.files.outputs.changed_files }}
+          STATUS_TXT: "MANUAL"
         run: |
-          if [ -f sonar-quality-gate-status.txt ]; then
-            export SONAR_QUALITY_GATE_STATUS="$(cat sonar-quality-gate-status.txt)"
-          fi
           chmod +x tools/telegram-notify.sh
           ./tools/telegram-notify.sh
