@@ -4,4 +4,4 @@ coverage/
 *.lcov
 .DS_Store
 .scannerwork/
-telegram_message.txt
+sonar-metrics.env

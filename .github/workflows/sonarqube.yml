@@ -69,21 +69,46 @@ jobs:
           done
           curl -sf http://localhost:9000/api/system/status | grep -q "UP" || exit 1
 
-      - name: Generar token e importar StrictGate
+      - name: Configurar Quality Gate StrictGate
         run: |
-          for i in {1..12}; do
+          TOKEN_RESPONSE=$(curl -s -X POST "http://localhost:9000/api/user_tokens/generate" \
+            -u "admin:admin" -d "name=ci-token-${GITHUB_RUN_ID}&type=GLOBAL_ANALYSIS_TOKEN")
+          TOKEN=$(echo "$TOKEN_RESPONSE" | jq -r '.token // empty')
+          [ "$TOKEN" = "null" ] || [ -z "$TOKEN" ] && sleep 10 && \
             TOKEN_RESPONSE=$(curl -s -X POST "http://localhost:9000/api/user_tokens/generate" \
-              -u "admin:admin" -d "name=ci-token-${GITHUB_RUN_ID}&type=GLOBAL_ANALYSIS_TOKEN")
+            -u "admin:admin" -d "name=ci-token-${GITHUB_RUN_ID}&type=GLOBAL_ANALYSIS_TOKEN") && \
             TOKEN=$(echo "$TOKEN_RESPONSE" | jq -r '.token // empty')
-            [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ] && break
-            sleep 10
-          done
-          [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ] && echo "No se pudo generar token SonarQube" && exit 1
+          [ "$TOKEN" = "null" ] || [ -z "$TOKEN" ] && echo "No se pudo generar token" && exit 1
           echo "SONAR_TOKEN=$TOKEN" >> "$GITHUB_ENV"
-          chmod +x tools/import-quality-gate.sh
-          SONAR_HOST_URL=http://localhost:9000 SONAR_TOKEN="$TOKEN" ./tools/import-quality-gate.sh
+
+          QG_ID=$(curl -s -X POST "http://localhost:9000/api/qualitygates/create" \
+            -u "admin:admin" -d "name=StrictGate" | jq -r '.id')
+          if [ "$QG_ID" = "null" ] || [ -z "$QG_ID" ]; then
+            QG_ID=$(curl -s "http://localhost:9000/api/qualitygates/list" -u "admin:admin" \
+              | jq -r '.qualitygates[] | select(.name=="StrictGate") | .id')
+          fi
+
+          if [ -n "$QG_ID" ] && [ "$QG_ID" != "null" ]; then
+            CONDITIONS=$(curl -s "http://localhost:9000/api/qualitygates/show?id=$QG_ID" -u "admin:admin" | jq -r '.conditions[]?.id')
+            for cond in $CONDITIONS; do
+              curl -s -X POST "http://localhost:9000/api/qualitygates/delete_condition" \
+                -u "admin:admin" -d "id=$cond" > /dev/null
+            done
+            curl -s -X POST "http://localhost:9000/api/qualitygates/create_condition" -u "admin:admin" -d "gateId=$QG_ID&metric=blocker_violations&op=GT&error=0"
+            curl -s -X POST "http://localhost:9000/api/qualitygates/create_condition" -u "admin:admin" -d "gateId=$QG_ID&metric=critical_violations&op=GT&error=0"
+            curl -s -X POST "http://localhost:9000/api/qualitygates/create_condition" -u "admin:admin" -d "gateId=$QG_ID&metric=major_violations&op=GT&error=5"
+            curl -s -X POST "http://localhost:9000/api/qualitygates/create_condition" -u "admin:admin" -d "gateId=$QG_ID&metric=security_hotspots_reviewed&op=LT&error=100"
+            curl -s -X POST "http://localhost:9000/api/qualitygates/create_condition" -u "admin:admin" -d "gateId=$QG_ID&metric=coverage&op=LT&error=80"
+            curl -s -X POST "http://localhost:9000/api/qualitygates/create_condition" -u "admin:admin" -d "gateId=$QG_ID&metric=duplicated_lines_density&op=GT&error=3"
+            curl -s -X POST "http://localhost:9000/api/qualitygates/create_condition" -u "admin:admin" -d "gateId=$QG_ID&metric=sqale_debt_ratio&op=GT&error=2.5"
+            curl -s -X POST "http://localhost:9000/api/qualitygates/create_condition" -u "admin:admin" -d "gateId=$QG_ID&metric=complexity&op=GT&error=50"
+            curl -s -X POST "http://localhost:9000/api/qualitygates/create_condition" -u "admin:admin" -d "gateId=$QG_ID&metric=cognitive_complexity&op=GT&error=30"
+            curl -s -X POST "http://localhost:9000/api/qualitygates/set_as_default" -u "admin:admin" -d "id=$QG_ID"
+          fi
 
       - name: Ejecutar SonarQube Scan
+        id: scan
+        continue-on-error: true
         uses: SonarSource/sonarqube-scan-action@v2
         env:
           SONAR_TOKEN: ${{ env.SONAR_TOKEN }}
@@ -92,80 +117,19 @@ jobs:
             -Dsonar.qualitygate.wait=true
             -Dsonar.qualitygate.timeout=300
             -Dsonar.projectKey=taller-app-reservas
+            -Dsonar.exclusions=**/node_modules/**,**/coverage/**,**/.next/**,**/dist/**
 
       - name: Listar archivos indexados
         if: always()
         run: |
-          echo "=== Archivos indexados por SonarQube ==="
+          echo "=== Scan outcome: ${{ steps.scan.outcome }} ==="
           curl -s "http://localhost:9000/api/components/tree?component=taller-app-reservas&qualifiers=FIL&ps=500" \
-            -u "admin:admin" | jq -r '.components[].path' | sort
+            -u "admin:admin" | jq -r '.components[].path' | sort | head -30
           TOTAL=$(curl -s "http://localhost:9000/api/components/tree?component=taller-app-reservas&qualifiers=FIL&ps=500" \
             -u "admin:admin" | jq '.components | length')
-          echo "Total de archivos indexados: $TOTAL"
+          echo "Total archivos indexados: $TOTAL"
 
-      - name: Obtener metricas de SonarQube
-        if: always()
-        run: |
-          rating_to_letter() { case $1 in 1) echo "A";; 2) echo "B";; 3) echo "C";; 4) echo "D";; 5) echo "E";; *) echo "N/A";; esac }
-
-          echo "Esperando metricas de SonarQube..."
-          for i in {1..30}; do
-            METRICS_RAW=$(curl -s "http://localhost:9000/api/measures/component?component=taller-app-reservas&metricKeys=bugs,vulnerabilities,code_smells,duplicated_lines_density,ncloc,security_rating,reliability_rating,sqale_rating" -u "admin:admin")
-            COMPONENT=$(echo "$METRICS_RAW" | jq -r '.component // null')
-            [ "$COMPONENT" != "null" ] && [ -n "$COMPONENT" ] && break
-            sleep 5
-          done
-
-          QG_RAW=$(curl -s "http://localhost:9000/api/qualitygates/project_status?projectKey=taller-app-reservas" -u "admin:admin")
-          QG_STATUS=$(echo "$QG_RAW" | jq -r '.projectStatus.status // "ERROR"')
-
-          if [ "$(echo "$METRICS_RAW" | jq -r '.component // null')" != "null" ]; then
-            BUGS=$(echo "$METRICS_RAW" | jq -r '.component.measures[]? | select(.metric=="bugs") | .value // 0')
-            VULNS=$(echo "$METRICS_RAW" | jq -r '.component.measures[]? | select(.metric=="vulnerabilities") | .value // 0')
-            SMELLS=$(echo "$METRICS_RAW" | jq -r '.component.measures[]? | select(.metric=="code_smells") | .value // 0')
-            DUPL=$(echo "$METRICS_RAW" | jq -r '.component.measures[]? | select(.metric=="duplicated_lines_density") | .value // 0.0')
-            LINES=$(echo "$METRICS_RAW" | jq -r '.component.measures[]? | select(.metric=="ncloc") | .value // 0')
-            SEC_R=$(echo "$METRICS_RAW" | jq -r '.component.measures[]? | select(.metric=="security_rating") | .value // null')
-            REL_R=$(echo "$METRICS_RAW" | jq -r '.component.measures[]? | select(.metric=="reliability_rating") | .value // null')
-            MAIN_R=$(echo "$METRICS_RAW" | jq -r '.component.measures[]? | select(.metric=="sqale_rating") | .value // null')
-          else
-            echo "AVISO: No se obtuvieron metricas"
-            BUGS=0; VULNS=0; SMELLS=0; DUPL=0.0; LINES=0
-            SEC_R=null; REL_R=null; MAIN_R=null
-          fi
-
-          SEC_LETTER=$(rating_to_letter $SEC_R)
-          REL_LETTER=$(rating_to_letter $REL_R)
-          MAIN_LETTER=$(rating_to_letter $MAIN_R)
-          STATUS_TXT=$([ "$QG_STATUS" = "OK" ] && echo "APROBADO" || echo "FALLADO")
-
-          echo "SONAR_QUALITY_GATE_STATUS=$QG_STATUS" >> "$GITHUB_ENV"
-          echo "METRICS_BUGS=$BUGS" >> "$GITHUB_ENV"
-          echo "METRICS_VULNS=$VULNS" >> "$GITHUB_ENV"
-          echo "METRICS_SMELLS=$SMELLS" >> "$GITHUB_ENV"
-          echo "METRICS_DUPL=$DUPL" >> "$GITHUB_ENV"
-          echo "METRICS_LINES=$LINES" >> "$GITHUB_ENV"
-          echo "METRICS_SEC=$SEC_LETTER" >> "$GITHUB_ENV"
-          echo "METRICS_REL=$REL_LETTER" >> "$GITHUB_ENV"
-          echo "METRICS_MAIN=$MAIN_LETTER" >> "$GITHUB_ENV"
-          echo "STATUS_TXT=$STATUS_TXT" >> "$GITHUB_ENV"
-
-      - name: Reporte en GitHub
-        if: always()
-        run: |
-          cat >> "$GITHUB_STEP_SUMMARY" << EOF
-          # Reporte SAST — Taller App Reservas
-          ## Quality Gate: **${{ env.STATUS_TXT }}**
-          | Métrica | Valor |
-          |---|---|
-          | Bugs | **${{ env.METRICS_BUGS }}** |
-          | Vulnerabilidades | **${{ env.METRICS_VULNS }}** |
-          | Code Smells | **${{ env.METRICS_SMELLS }}** |
-          | Líneas de código | **${{ env.METRICS_LINES }}** |
-          | Duplicación | **${{ env.METRICS_DUPL }}%** |
-          EOF
-
-      - name: Enviar notificacion a Telegram
+      - name: Obtener metricas y notificar Telegram
         if: always()
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -178,20 +142,33 @@ jobs:
           COMMIT_MESSAGE: ${{ github.event.head_commit.message || github.event.pull_request.title || 'CI run' }}
           CHANGED_FILES: ${{ steps.files.outputs.changed_files }}
           ACTIONS_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          SONAR_QUALITY_GATE_STATUS: ${{ env.SONAR_QUALITY_GATE_STATUS }}
-          STATUS_TXT: ${{ env.STATUS_TXT }}
-          METRICS_BUGS: ${{ env.METRICS_BUGS }}
-          METRICS_VULNS: ${{ env.METRICS_VULNS }}
-          METRICS_SMELLS: ${{ env.METRICS_SMELLS }}
-          METRICS_LINES: ${{ env.METRICS_LINES }}
-          METRICS_DUPL: ${{ env.METRICS_DUPL }}
-          METRICS_SEC: ${{ env.METRICS_SEC }}
-          METRICS_REL: ${{ env.METRICS_REL }}
-          METRICS_MAIN: ${{ env.METRICS_MAIN }}
         run: |
-          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
-            echo "Secrets de Telegram no configurados — omitiendo notificación."
-            exit 0
+          chmod +x tools/fetch-sonar-metrics.sh tools/telegram-notify.sh
+          ./tools/fetch-sonar-metrics.sh http://localhost:9000 taller-app-reservas admin admin
+          set -a && source sonar-metrics.env && set +a
+
+          cat >> "$GITHUB_STEP_SUMMARY" << EOF
+          # Reporte SAST — Taller App Reservas
+          ## Quality Gate: **${STATUS_TXT}**
+          | Métrica | Valor |
+          |---|---|
+          | Bugs | **${METRICS_BUGS}** |
+          | Vulnerabilidades | **${METRICS_VULNS}** |
+          | Code Smells | **${METRICS_SMELLS}** |
+          | Líneas de código | **${METRICS_LINES}** |
+          | Duplicación | **${METRICS_DUPL}%** |
+          EOF
+
+          if [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -n "${TELEGRAM_CHAT_ID:-}" ]; then
+            ./tools/telegram-notify.sh
+          else
+            echo "Secrets Telegram no configurados."
           fi
-          chmod +x tools/telegram-notify.sh
-          ./tools/telegram-notify.sh
+
+      - name: Fallar si el Quality Gate no se cumple
+        if: always()
+        run: |
+          if [ "${{ env.SONAR_QUALITY_GATE_STATUS }}" != "OK" ]; then
+            echo "Quality Gate FAILED (esperado con orders-service demo)."
+            exit 1
+          fi
