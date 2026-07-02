@@ -120,7 +120,7 @@ El repositorio debe incluir los siguientes elementos:
 .github/workflows/sonarqube.yml
 ```
 
-- Configuración del **Quality Gate** exportada desde SonarQube mediante un archivo:
+- Configuración del **Quality Gate** exportada desde SonarQube mediante un archivo json:
 
 ```text
 qualitygate.json
