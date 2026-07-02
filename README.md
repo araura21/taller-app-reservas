@@ -1,56 +1,49 @@
-# 📆 ReservasEC
+# 📆 ReservasEC — Taller Quality Gates
 
-**ReservasEC** es una plataforma fullstack de gestión de reservas desarrollada con una arquitectura de microservicios. Permite a los usuarios registrarse, iniciar sesión, gestionar su perfil, crear y cancelar reservas, y recibir notificaciones. El sistema está dockerizado para facilitar el despliegue local.
+**ReservasEC** es una plataforma fullstack de gestión de reservas con arquitectura de microservicios. Este repositorio incluye la integración de **SonarQube**, **Quality Gates** y **notificaciones Telegram** requerida por el taller.
 
 ## 🚀 Tecnologías principales
 
 - **Frontend:** Next.js + Tailwind CSS
-- **Backend (Microservicios):**
-  - Auth Service (Node.js + Express)
-  - Booking Service (Node.js + Express)
-  - User Service (Node.js + Express)
-  - Notification Service (Node.js + Express + Nodemailer)
-- **Base de datos:** MongoDB
-- **Autenticación:** JSON Web Tokens (JWT)
+- **Backend:** Auth, Booking, User, Notification (Node.js + Express)
+- **Demo taller:** `orders-service` (errores intencionales para Quality Gate)
+- **Calidad:** SonarQube + GitHub Actions + Telegram
 - **Contenedores:** Docker + Docker Compose
 
 ---
 
-## 📁 Estructura de carpetas
+## 📁 Estructura del proyecto
 
 ```plaintext
-/reservas-ec
-├── frontend/             # Next.js App
-├── auth-service/         # Servicio de autenticación
-├── user-service/         # Servicio de usuarios
-├── booking-service/      # Servicio de reservas
-├── notification-service/ # Servicio de notificaciones por email
-└── docker-compose.yml    # Orquestación de todos los servicios
+taller-app-reservas/
+├── .github/workflows/
+│   ├── sonarqube.yml          # Análisis SAST + Quality Gate
+│   └── telegram-notify.yml    # Notificaciones al grupo
+├── tools/                     # Scripts reutilizables del equipo
+├── orders-service/            # Demo con errores intencionales
+├── qualitygate.json           # Definición StrictGate
+├── sonar-project.properties   # Configuración del análisis
+├── docker-compose.yml         # App de reservas
+└── docker-compose.sonar.yml   # SonarQube local
 ```
 
 ---
 
-## ⚙️ Configuración del entorno
+## ⚙️ Configuración de la aplicación
 
-### 1. Clonar el repositorio
-
-```bash
-git clone https://github.com/tu-usuario/reservas-ec.git
-cd reservas-ec
-```
-
-### 2. Variables de entorno
-
-🔐 Frontend (frontend/.env.production.local)
+### Clonar e instalar
 
 ```bash
-NEXT_PUBLIC_API_URL=/api/auth
-NEXT_PUBLIC_BOOKING_URL=/api/bookings
-NEXT_PUBLIC_USER_URL=/api/users
+git clone https://github.com/araura21/taller-app-reservas.git
+cd taller-app-reservas
+docker-compose build && docker-compose up
 ```
 
-🔐 Backend .env (cada microservicio)
-Ejemplo para auth-service:
+App disponible en http://localhost:3000
+
+### Variables de entorno
+
+Cada microservicio tiene su `.env`. Ejemplo `auth-service`:
 
 ```bash
 PORT=4000
@@ -58,36 +51,139 @@ MONGO_URI=mongodb://mongo:27017/auth-db
 JWT_SECRET=supersecretkey
 ```
 
-Repite para los demás servicios cambiando PORT, MONGO_URI y usando el mismo JWT_SECRET.
+---
 
-### 3. 🐳 Uso con Docker
+## 🔍 SonarQube — Análisis local
 
-1. Construir los contenedores
-
-```bash
-docker-compose build
-```
-
-3. Levantar los servicios
+### 1. Levantar SonarQube
 
 ```bash
-docker-compose up
+docker compose -f docker-compose.sonar.yml up -d
 ```
 
-La app estará disponible en http://localhost:3000
+Abrir http://localhost:9000 — usuario inicial `admin` / `admin` (cambiar contraseña en el primer login).
 
-## ✅ Funcionalidades principales
+### 2. Generar token
 
-- Registro e inicio de sesión de usuarios
+**My Account → Security → Generate Token** → guardar el token (no subirlo al repo).
 
+### 3. Importar Quality Gate `StrictGate`
+
+```bash
+export SONAR_HOST_URL=http://localhost:9000
+export SONAR_TOKEN=<tu-token>
+chmod +x tools/import-quality-gate.sh
+./tools/import-quality-gate.sh
+```
+
+| Métrica | Condición | Umbral |
+|---------|-----------|--------|
+| Blocker Issues | > | 0 |
+| Critical Issues | > | 0 |
+| Major Issues | > | 5 |
+| Security Hotspots Reviewed | < | 100% |
+| Coverage | < | 80% |
+| Duplicated Lines (%) | > | 3% |
+| Technical Debt Ratio | > | 2.5% |
+| Cyclomatic Complexity (total) | > | 50 |
+| Cognitive Complexity (total) | > | 30 |
+
+Los umbrales se editan en `qualitygate.json` y se reimportan con el script.
+
+### 4. Ejecutar análisis manual
+
+```bash
+export SONAR_TOKEN=<tu-token>
+chmod +x tools/run-sonar-analysis.sh
+./tools/run-sonar-analysis.sh
+```
+
+Resultado: http://localhost:9000/dashboard?id=taller-app-reservas
+
+### Servicio demo `orders-service`
+
+Contiene **errores intencionales** para demostrar un Quality Gate fallido. Ver `orders-service/README.md`.
+
+---
+
+## 🤖 Bot de Telegram
+
+### Configuración (una sola vez)
+
+1. Crear bot con **@BotFather** (`/newbot`) y guardar el token.
+2. Crear grupo de Telegram, invitar al bot.
+3. Obtener **Chat ID** con:
+   ```text
+   https://api.telegram.org/bot<TOKEN>/getUpdates
+   ```
+4. Configurar secrets en GitHub (**Settings → Secrets → Actions**):
+
+| Secret | Descripción |
+|--------|-------------|
+| `TELEGRAM_BOT_TOKEN` | Token de BotFather |
+| `TELEGRAM_CHAT_ID` | ID del grupo (incluye el `-`) |
+
+> Nunca commitear tokens. Solo usar GitHub Secrets.
+
+### Probar localmente
+
+```bash
+export TELEGRAM_BOT_TOKEN=<token>
+export TELEGRAM_CHAT_ID=<chat-id>
+export GITHUB_ACTOR="Tu Nombre"
+export GITHUB_REF_NAME="main"
+export GITHUB_REPOSITORY="araura21/taller-app-reservas"
+export GITHUB_SHA="$(git rev-parse HEAD)"
+./tools/telegram-notify.sh
+```
+
+### Contenido de cada notificación
+
+- Autor del commit
+- Rama afectada
+- Lista de archivos modificados
+- Enlace al commit en GitHub
+- Resultado del Quality Gate de SonarQube
+
+---
+
+## ⚡ Pipelines CI/CD
+
+| Workflow | Trigger | Función |
+|----------|---------|---------|
+| `sonarqube.yml` | push/PR a `main` y `develop` | Tests, cobertura, análisis SAST, falla si el gate no pasa |
+| `telegram-notify.yml` | Al terminar el workflow de SonarQube | Envía notificación al grupo de Telegram |
+
+El análisis en CI levanta SonarQube como service container — no requiere ngrok ni servidor externo.
+
+---
+
+## 👥 Roles del equipo
+
+| Rol | Responsabilidad |
+|-----|-----------------|
+| **Líder de calidad** | SonarQube local, importar `StrictGate`, evidencias |
+| **DevOps** | Secrets de GitHub, bot Telegram, workflows |
+| **Desarrolladores** | Corregir issues, ampliar tests y cobertura |
+
+---
+
+## 🛠️ Guía de modificación
+
+| Cambiar… | Archivo |
+|----------|---------|
+| Umbrales del Quality Gate | `qualitygate.json` |
+| Servicios analizados | `sonar-project.properties` |
+| Servicios con tests en CI | `tools/run-tests-with-coverage.sh` |
+| Mensaje Telegram | `tools/telegram-notify.sh` |
+| Triggers CI | `.github/workflows/*.yml` |
+
+---
+
+## ✅ Funcionalidades de la app
+
+- Registro e inicio de sesión
 - Perfil editable
-
 - Creación y cancelación de reservas
-
-- Historial de reservas activas y canceladas
-
-- Límite de 5 reservas canceladas visibles
-
-- Notificaciones por email (reserva y cancelación)
-
-- Gestión de microservicios independientes
+- Notificaciones por email
+- Quality Gates automatizados con notificación al equipo

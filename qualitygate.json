@@ -1,6 +1,6 @@
 {
   "name": "StrictGate",
-  "description": "Quality Gate. Importar con: ./tools/import-quality-gate.sh",
+  "description": "Quality Gate StrictGate. Importar con: ./tools/import-quality-gate.sh",
   "conditions": [
     {
       "metric": "blocker_violations",

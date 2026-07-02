@@ -1,2 +1,7 @@
 node_modules/
+coverage/
+.env
+*.lcov
+.DS_Store
 .scannerwork/
+telegram_message.txt
