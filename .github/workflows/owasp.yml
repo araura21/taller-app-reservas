@@ -81,3 +81,27 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
 
           echo "Revisar artifact zap-report para detalles." >> $GITHUB_STEP_SUMMARY
+
+
+      - name: Notificar resultado a Telegram
+        if: always()
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            MENSAJE="OWASP ZAP finalizó correctamente
+
+            Repositorio: ${{ github.repository }}
+            Rama: ${{ github.ref_name }}
+            Autor: ${{ github.actor }}
+            Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          else
+            MENSAJE="OWASP ZAP encontró un error
+
+            Repositorio: ${{ github.repository }}
+            Rama: ${{ github.ref_name }}
+            Autor: ${{ github.actor }}
+            Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          fi
+
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+            --data-urlencode text="$MENSAJE"
