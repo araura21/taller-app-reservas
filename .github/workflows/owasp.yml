@@ -1,0 +1,83 @@
+name: OWASP ZAP DAST Analysis
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+jobs:
+
+  zap:
+    name: Analisis DAST OWASP ZAP
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+
+      - name: Checkout codigo
+        uses: actions/checkout@v4
+
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+
+      - name: Instalar dependencias
+        run: |
+          cd auth-service && npm install --ignore-scripts
+          cd ../booking-service && npm install --ignore-scripts
+          cd ../user-service && npm install --ignore-scripts
+          cd ../notification-service && npm install --ignore-scripts
+          cd ../frontend && npm install --ignore-scripts
+
+
+      - name: Levantar aplicacion
+        run: |
+          docker compose up -d
+
+          echo "Esperando servicios..."
+
+          sleep 30
+
+
+      - name: Verificar aplicacion
+        run: |
+          curl -f http://localhost:3000 || exit 1
+
+
+      - name: Ejecutar OWASP ZAP Scan
+        uses: zaproxy/action-baseline@v0.11.0
+        with:
+          target: 'http://localhost:3000'
+          rules_file_name: '.zap/rules.tsv'
+          cmd_options: '-a'
+          allow_issue_writing: false
+
+
+      - name: Guardar reporte ZAP
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-report
+          path: |
+            report_html.html
+            report_json.json
+
+
+      - name: Publicar resumen
+        if: always()
+        run: |
+
+          echo "# Reporte OWASP ZAP DAST" >> $GITHUB_STEP_SUMMARY
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "Target: http://localhost:3000" >> $GITHUB_STEP_SUMMARY
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "Revisar artifact zap-report para detalles." >> $GITHUB_STEP_SUMMARY
